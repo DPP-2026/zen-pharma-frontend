@@ -8,7 +8,7 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 
 test('renders login page', () => {
   render(
-    <MemoryRouter>
+    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <Login />

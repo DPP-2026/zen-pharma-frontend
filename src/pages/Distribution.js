@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Box, Button, Card, CardContent, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, CircularProgress, Alert } from '@mui/material';
+import React from 'react';
+import { Box, Button, Card, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography, CircularProgress, Alert } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import { useQuery } from 'react-query';
 import api from '../services/api';
