@@ -138,6 +138,12 @@ jobs:
             echo "environment=dev" >> $GITHUB_OUTPUT
           fi
 
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
       - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
@@ -145,12 +151,10 @@ jobs:
           token: ${{ secrets.GITOPS_TOKEN }}
           path: zen-gitops
 
-      - name: Update image tag in K8s manifest
+      - name: Update image tag in Helm values
         run: |
-          ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
-          NEW_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
-          sed -i "s|image: .*pharma-ui.*|image: ${NEW_IMAGE}|g" \
-            zen-gitops/k8s-manifests/pharma-ui/deployment.yaml
+          VALUES="zen-gitops/envs/${{ steps.env.outputs.environment }}/values-pharma-ui.yaml"
+          yq e ".image.tag = \"${{ env.IMAGE_TAG }}\"" -i "$VALUES"
 
       - name: Commit and push
         run: |
