@@ -14,7 +14,6 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: pharma-ui
   IMAGE_TAG: ${{ github.sha }}
-  GITOPS_REPO: DPP-2026/zen-gitops
 
 jobs:
   # ── 1. Lint ───────────────────────────────────────────────────────────────
@@ -136,7 +135,7 @@ jobs:
       - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.GITOPS_REPO }}
+          repository: ${{ vars.GITOPS_REPO }}
           token: ${{ secrets.GITOPS_TOKEN }}
           path: zen-gitops
 
