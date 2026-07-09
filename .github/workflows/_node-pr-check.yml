@@ -1,0 +1,82 @@
+# Reusable — Lightweight Node.js PR / Feature Branch Check
+#
+# Used by ci-pr-pharma-ui.yml on feat-*, fix-*, chore-* branches.
+# No Docker, no ECR, no Cosign. Fast feedback for developers.
+#
+# Stages:
+#   1. ESLint        — lint (--max-warnings 0)
+#   2. Jest          — unit tests + coverage
+#   3. CodeQL        — JavaScript security-extended SAST
+#   4. npm audit     — fail on HIGH/CRITICAL vulnerabilities
+
+name: Reusable — Node.js PR Check (no Docker)
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        required: true
+        type: string
+      service-dir:
+        required: true
+        type: string
+      node-version:
+        required: false
+        type: string
+        default: '20'
+
+jobs:
+  pr-check:
+    name: PR Check (${{ inputs.service-name }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      security-events: write
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.service-dir }}/package-lock.json
+
+      - name: Install dependencies
+        run: cd ${{ inputs.service-dir }} && npm ci
+
+      - name: ESLint (--max-warnings 0)
+        run: cd ${{ inputs.service-dir }} && npx eslint src/ --ext .js,.jsx --max-warnings 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          queries: security-extended
+
+      - name: Jest (tests + coverage)
+        run: cd ${{ inputs.service-dir }} && npm test -- --coverage --watchAll=false --ci
+        env:
+          CI: true
+
+      - name: Upload Jest coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.service-name }}
+          path: ${{ inputs.service-dir }}/coverage/
+          retention-days: 3
+
+      - name: CodeQL — Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript
+
+      - name: npm audit (HIGH/CRITICAL → fail)
+        run: cd ${{ inputs.service-dir }} && npm audit --audit-level=high
