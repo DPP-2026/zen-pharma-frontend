@@ -1,0 +1,206 @@
+name: CI/CD — pharma-ui
+
+# Triggers on push to develop / release branches only.
+# Feature branches and PRs → ci-pr-pharma-ui.yml
+#
+# Jobs:
+#   build       → npm + CodeQL + audit + Docker + Trivy + ECR + Cosign
+#   deploy-dev  → direct commit to envs/dev/ → ArgoCD auto-syncs
+#   open-qa-pr  → opens a PR in zen-gitops for envs/qa/ (PR merge = QA deployment)
+#
+# PROD promotion → promote-prod.yml (workflow_dispatch)
+
+on:
+  push:
+    branches: [develop, 'release/**']
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Dockerfile'
+      - 'nginx.conf'
+      - '.github/workflows/ci-pharma-ui.yml'
+      - '.github/workflows/_node-build.yml'
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+  actions: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: pharma-ui
+  GITOPS_REPO: ${{ vars.GITOPS_REPO }}
+
+jobs:
+
+  # ── 1. Build: npm · CodeQL · audit · Docker · Trivy · ECR · Cosign ──
+  build:
+    name: Build & Security Gates
+    uses: ./.github/workflows/_node-build.yml
+    with:
+      service-name: pharma-ui
+      service-dir: .
+      ecr-repository: pharma-ui
+      node-version: '20'
+      aws-region: us-east-1
+    secrets: inherit
+
+  # ── 2. Deploy to DEV (direct commit — ArgoCD auto-syncs) ──────────────────
+  deploy-dev:
+    name: Deploy — DEV
+    needs: build
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Checkout GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: _gitops
+
+      - name: Update image tag — DEV
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
+        run: |
+          yq e ".image.tag = \"${IMAGE_TAG}\"" -i \
+            "_gitops/envs/dev/values-pharma-ui.yaml"
+          cd _gitops
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --staged --quiet && echo "Already up to date" && exit 0
+          git commit -m "ci(dev): update pharma-ui → ${IMAGE_TAG}"
+          git push
+
+  # ── 3. Open QA promotion PR in zen-gitops (PR merge = QA deployment) ─────
+  open-qa-pr:
+    name: Open PR — QA Promotion
+    needs: [build, deploy-dev]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Checkout GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: _gitops
+
+      - name: Create branch, commit, open PR
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+          IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          GITOPS_REPO_NAME: ${{ env.GITOPS_REPO }}
+        run: |
+          VALUES="_gitops/envs/qa/values-pharma-ui.yaml"
+          BRANCH="promote/qa/pharma-ui/latest"
+
+          if [[ ! -f "$VALUES" ]]; then
+            echo "::warning::$VALUES not found in zen-gitops — QA PR skipped."
+            exit 0
+          fi
+
+          cd _gitops
+          if git ls-remote --exit-code origin "$BRANCH" &>/dev/null; then
+            git fetch origin "$BRANCH"
+            git checkout -b "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
+          yq e ".image.tag = \"${IMAGE_TAG}\"" -i "envs/qa/values-pharma-ui.yaml"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --staged --quiet; then
+            echo "QA already has this image — no PR needed"
+            exit 0
+          fi
+          git commit -m "promote(qa): pharma-ui → ${IMAGE_TAG}"
+          git push --force-with-lease origin "$BRANCH"
+
+          printf '%s\n' \
+            "## QA Promotion" \
+            "" \
+            "Service : pharma-ui" \
+            "Image   : ${IMAGE_TAG}" \
+            "Branch  : ${REF_NAME}" \
+            "Actor   : ${ACTOR}" \
+            "Build   : ${SERVER_URL}/${REPOSITORY}/actions/runs/${RUN_ID}" \
+            "" \
+            "## Checklist" \
+            "- [ ] DEV smoke test passed (see build link above)" \
+            "- [ ] No unexpected config changes in this diff" \
+            "- [ ] QA team sign-off" \
+            "" \
+            "Merging this PR updates envs/qa/values-pharma-ui.yaml." \
+            "ArgoCD (pharma-qa) auto-syncs on merge." > /tmp/pr-body.md
+
+          PR_TITLE="promote(qa): pharma-ui → ${IMAGE_TAG}"
+          PR_BODY=$(cat /tmp/pr-body.md)
+          EXISTING_PR=$(gh api "repos/${GITOPS_REPO_NAME}/pulls?head=${GITOPS_REPO_NAME%%/*}:${BRANCH}&state=open&per_page=1" --jq '.[0].number // empty' 2>/dev/null || true)
+          if [[ -n "$EXISTING_PR" ]]; then
+            gh api "repos/${GITOPS_REPO_NAME}/pulls/${EXISTING_PR}" \
+              --method PATCH \
+              --field title="${PR_TITLE}" \
+              --field body="${PR_BODY}"
+            echo "::notice title=QA PR updated::PR #${EXISTING_PR} updated to ${IMAGE_TAG}."
+          else
+            gh api "repos/${GITOPS_REPO_NAME}/pulls" \
+              --method POST \
+              --field title="${PR_TITLE}" \
+              --field body="${PR_BODY}" \
+              --field base=main \
+              --field head="$BRANCH"
+            echo "::notice title=QA PR opened::Review and merge in ${GITOPS_REPO_NAME} to deploy to QA."
+          fi
+
+  # ── 4. DAST — ZAP baseline scan against DEV ─────────────────────────────────
+  # Disabled. Enable by removing `if: false` once DEV_PHARMA_UI_URL is set in
+  # GitHub repository variables (Settings → Secrets and variables → Variables).
+  dast:
+    name: DAST — ZAP Baseline (DEV)
+    if: false
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for DEV service to be healthy
+        run: |
+          URL="${{ vars.DEV_PHARMA_UI_URL }}/"
+          for i in $(seq 1 20); do
+            curl -sf "$URL" && echo "Healthy" && exit 0
+            echo "Attempt $i/20 — retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::DEV endpoint not healthy after 5 minutes"
+          exit 1
+
+      - name: OWASP ZAP — Baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ vars.DEV_PHARMA_UI_URL }}
+          fail_action: warn
+          artifact_name: zap-report-pharma-ui
