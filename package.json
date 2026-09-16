@@ -3,22 +3,25 @@
   "version": "5.0.0",
   "private": true,
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.0",
-    "axios": "^1.6.2",
-    "@mui/material": "^5.15.0",
-    "@mui/icons-material": "^5.15.0",
     "@emotion/react": "^11.11.0",
     "@emotion/styled": "^11.11.0",
-    "recharts": "^2.10.0",
-    "react-query": "^3.39.3"
+    "@mui/icons-material": "^5.15.0",
+    "@mui/material": "^5.15.0",
+    "axios": "^1.6.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-query": "^3.39.3",
+    "react-router": "^6.30.3",
+    "react-router-dom": "^6.30.3",
+    "react-scripts": "^5.0.1",
+    "recharts": "^2.10.0"
   },
   "devDependencies": {
-    "react-scripts": "5.0.1",
-    "@testing-library/react": "^14.1.2",
     "@testing-library/jest-dom": "^6.1.5",
-    "@testing-library/user-event": "^14.5.1"
+    "@testing-library/react": "^14.1.2",
+    "@testing-library/user-event": "^14.5.1",
+    "eslint": "^8.57.1",
+    "eslint-config-react-app": "^7.0.1"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -32,10 +35,22 @@
       "!src/index.js",
       "!src/reportWebVitals.js"
     ],
-    "coverageReporters": ["lcov", "text", "clover"]
+    "coverageReporters": [
+      "lcov",
+      "text",
+      "clover"
+    ]
   },
   "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 Firefox version",
+      "last 1 safari version"
+    ]
   }
 }
